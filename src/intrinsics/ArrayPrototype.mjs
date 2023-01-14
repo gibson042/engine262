@@ -263,7 +263,7 @@ function ArrayProto_keys(args, { thisValue }) {
 }
 
 /** http://tc39.es/ecma262/#sec-array.prototype.map */
-function ArrayProto_map([callbackfn = Value.undefined, thisArg = Value.undefined], { thisValue }) {
+export function ArrayProto_map([callbackfn = Value.undefined, thisArg = Value.undefined], { thisValue }) {
   const O = Q(ToObject(thisValue));
   const len = Q(LengthOfArrayLike(O));
   if (IsCallable(callbackfn) === Value.false) {
@@ -346,7 +346,7 @@ function ArrayProto_shift(args, { thisValue }) {
 }
 
 /** http://tc39.es/ecma262/#sec-array.prototype.slice */
-function ArrayProto_slice([start = Value.undefined, end = Value.undefined], { thisValue }) {
+export function ArrayProto_slice([start = Value.undefined, end = Value.undefined], { thisValue }) {
   const O = Q(ToObject(thisValue));
   const len = Q(LengthOfArrayLike(O));
   const relativeStart = Q(ToIntegerOrInfinity(start));

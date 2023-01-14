@@ -18,6 +18,7 @@ import { bootstrapFunctionPrototype } from '../intrinsics/FunctionPrototype.mjs'
 import { bootstrapFunction } from '../intrinsics/Function.mjs';
 import { bootstrapSymbolPrototype } from '../intrinsics/SymbolPrototype.mjs';
 import { bootstrapSymbol } from '../intrinsics/Symbol.mjs';
+import { bootstrapIntl } from '../intrinsics/Intl.mjs';
 import { bootstrapMath } from '../intrinsics/Math.mjs';
 import { bootstrapDatePrototype } from '../intrinsics/DatePrototype.mjs';
 import { bootstrapDate } from '../intrinsics/Date.mjs';
@@ -204,6 +205,7 @@ export function CreateIntrinsics(realmRec) {
 
   bootstrapReflect(realmRec);
 
+  bootstrapIntl(realmRec);
   bootstrapMath(realmRec);
 
   bootstrapDatePrototype(realmRec);
@@ -356,6 +358,7 @@ export function SetDefaultGlobalBindings(realmRec) {
 
     // Other Properties of the Global Object
     // 'Atomics',
+    ...(realmRec.Intrinsics['%Intl%'] ? [ 'Intl' ] : []),
     'JSON',
     'Math',
     'Reflect',

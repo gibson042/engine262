@@ -118,7 +118,7 @@ function DateConstructor(args, { NewTarget }) {
 }
 
 /** http://tc39.es/ecma262/#sec-date.now */
-function Date_now() {
+export function Date_now() {
   const now = Date.now();
   return F(now);
 }
