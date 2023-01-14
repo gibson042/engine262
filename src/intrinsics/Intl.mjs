@@ -117,55 +117,6 @@ const DTF_COMPONENTS = {
   timeZoneName: ['short', 'long', 'shortOffset', 'longOffset', 'shortGeneric', 'longGeneric'],
 };
 
-const ToDateTimeOptions = (options, required, defaults) => {
-  if (options === Value.undefined) options = Value.null;
-  else options = Q(ToObject(options));
-  options = OrdinaryObjectCreate(options);
-  let needDefaults = Value.true;
-  const hostRequiredCategory = bridgeableForHost(required);
-  if (hostRequiredCategory === 'date' || hostRequiredCategory === 'any') {
-    for (const prop of ['weekday', 'year', 'month', 'day'].map(s => new Value(s))) {
-      const value = Q(Get(options, prop));
-      if (value !== Value.undefined) needDefaults = Value.false;
-    }
-  }
-  if (hostRequiredCategory === 'time' || hostRequiredCategory === 'any') {
-    for (const prop of ['dayPeriod', 'hour', 'minute', 'second', 'fractionalSecondDigits'].map(s => new Value(s))) {
-      const value = Q(Get(options, prop));
-      if (value !== Value.undefined) needDefaults = Value.false;
-    }
-  }
-  const dateStyle = Q(Get(options, new Value('dateStyle')));
-  const timeStyle = Q(Get(options, new Value('timeStyle')));
-  if (dateStyle !== Value.undefined || timeStyle !== Value.undefined) needDefaults = false;
-  if (hostRequiredCategory === 'date' && timeStyle !== Value.undefined) {
-    return surroundingAgent.Throw(
-      'TypeError',
-      'IncompatibleOptions',
-      'date-only formatting prohibits "timeStyle"',
-    );
-  }
-  if (hostRequiredCategory === 'time' && dateStyle !== Value.undefined) {
-    return surroundingAgent.Throw(
-      'TypeError',
-      'IncompatibleOptions',
-      'time-only formatting prohibits "dateStyle"',
-    );
-  }
-  const hostDefaultsCategory = bridgeableForHost(defaults);
-  if (needDefaults === Value.true && ['date', 'all'].includes(hostDefaultsCategory)) {
-    for (const prop of ['year', 'month', 'day'].map(s => new Value(s))) {
-      Q(CreateDataPropertyOrThrow(options, prop, new Value('numeric')));
-    }
-  }
-  if (needDefaults === Value.true && ['time', 'all'].includes(hostDefaultsCategory)) {
-    for (const prop of ['hour', 'minute', 'second'].map(s => new Value(s))) {
-      Q(CreateDataPropertyOrThrow(options, prop, new Value('numeric')));
-    }
-  }
-  return options;
-};
-
 
 export function bootstrapIntl(realmRec) {
   if (typeof Intl !== 'object') return;
@@ -273,16 +224,19 @@ export function bootstrapIntl(realmRec) {
     if (NewTarget === Value.undefined) {
       NewTarget = surroundingAgent.activeFunctionObject;
     }
-    const dtf = Q(OrdinaryCreateFromConstructor(
-      NewTarget,
+
+    return Q(CreateDateTimeFormat(NewTarget, locales, options, 'any', 'date'));
+  }
+
+  function CreateDateTimeFormat(newTarget, locales, options, requiredCategory, defaultsCategory) {
+    const dateTimeFormat = Q(OrdinaryCreateFromConstructor(
+      newTarget,
       '%DateTimeFormat.prototype%',
       // We defer to a host instance, replacing the need for most internal slots.
       ['HostDTFInstance', 'BoundFormat'],
     ));
-
-    // InitializeDateTimeFormat
     const requestedLocales = Q(limitedCanonicalizeLocaleList(locales));
-    options = Q(ToDateTimeOptions(options, new Value('any'), new Value('date')));
+    options = Q(CoerceOptionsToObject(options));
     const localeMatcher = Q(hostGetOption(
       options,
       'localeMatcher',
@@ -361,22 +315,49 @@ export function bootstrapIntl(realmRec) {
     hostOptions.timeStyle = bridgeableForHost(
       Q(hostGetOption(options, 'timeStyle', 'string', ['full', 'long', 'medium', 'short']))
     );
-    const broadStyle = hostOptions.dateStyle !== undefined || hostOptions.timeStyle !== undefined;
-    if (broadStyle && hasExplicitFormatComponents === Value.true) {
-      return surroundingAgent.Throw(
-        'TypeError',
-        'IncompatibleOptions',
-        '"dateStyle" and "timeStyle" prohibit field-specific formatting',
-      );
+    if (hostOptions.dateStyle !== undefined || hostOptions.timeStyle !== undefined) {
+      let errMessage;
+      if (hasExplicitFormatComponents === Value.true) {
+        errMessage = '"dateStyle" and "timeStyle" prohibit component-specific formatting';
+      } else if (requiredCategory === 'date' && hostOptions.timeStyle !== undefined) {
+        errMessage = 'date-only formatting prohibits "timeStyle"';
+      } else if (requiredCategory === 'time' && hostOptions.dateStyle !== undefined) {
+        errMessage = 'time-only formatting prohibits "dateStyle"';
+      }
+      if (errMessage) return surroundingAgent.Throw('TypeError', 'IncompatibleOptions', errMessage);
+    } else {
+      let needDefaults = Value.true;
+      if (requiredCategory === 'date' || requiredCategory === 'any') {
+        for (const prop of ['weekday', 'year', 'month', 'day']) {
+          const value = hostOptions[prop];
+          if (value !== undefined) needDefaults = Value.false;
+        }
+      }
+      if (requiredCategory === 'time' || requiredCategory === 'any') {
+        for (const prop of ['dayPeriod', 'hour', 'minute', 'second', 'fractionalSecondDigits']) {
+          const value = hostOptions[prop];
+          if (value !== undefined) needDefaults = Value.false;
+        }
+      }
+      if (needDefaults === Value.true && ['date', 'all'].includes(defaultsCategory)) {
+        for (const prop of ['year', 'month', 'day']) {
+          hostOptions[prop] = 'numeric';
+        }
+      }
+      if (needDefaults === Value.true && ['time', 'all'].includes(defaultsCategory)) {
+        for (const prop of ['hour', 'minute', 'second']) {
+          hostOptions[prop] = 'numeric';
+        }
+      }
     }
 
     const hostRequestedLocales = bridgeableForHost(requestedLocales);
     try {
-      dtf.HostDTFInstance = new hostDTF(hostRequestedLocales, hostOptions);
+      dateTimeFormat.HostDTFInstance = new hostDTF(hostRequestedLocales, hostOptions);
     } catch (err) {
       return surroundingAgent.Throw(err.name, 'Raw', err.message);
     }
-    return dtf;
+    return dateTimeFormat;
   }
 
   const DTF = realmRec.Intrinsics['%DateTimeFormat%'] = bootstrapConstructor(
