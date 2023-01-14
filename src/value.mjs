@@ -1,7 +1,10 @@
 import { surroundingAgent } from './engine.mjs';
 import {
   Assert,
+  CreateArrayFromList,
   CreateBuiltinFunction,
+  CreateDataPropertyOrThrow,
+  IsDataDescriptor,
   OrdinaryDefineOwnProperty,
   OrdinaryDelete,
   OrdinaryGet,
@@ -9,6 +12,7 @@ import {
   OrdinaryGetPrototypeOf,
   OrdinaryHasProperty,
   OrdinaryIsExtensible,
+  OrdinaryObjectCreate,
   OrdinaryOwnPropertyKeys,
   OrdinaryPreventExtensions,
   OrdinarySet,
@@ -17,6 +21,7 @@ import {
   ToUint32,
   Z,
   F,
+  isArrayExoticObject,
 } from './abstract-ops/all.mjs';
 import { EnvironmentRecord } from './environment.mjs';
 import { Completion, X } from './completion.mjs';
@@ -30,6 +35,10 @@ export class Value {
     }
 
     switch (typeof value) {
+      case 'undefined':
+        return Value.undefined;
+      case 'boolean':
+        return value === true ? Value.true : Value.false;
       case 'string':
         return new StringValue(value);
       case 'number':
@@ -38,6 +47,8 @@ export class Value {
         return new BigIntValue(value);
       case 'function':
         return CreateBuiltinFunction(value, 0, new Value(''), []);
+      case 'object':
+        if (value === null) return Value.null;
       default:
         throw new OutOfRange('new Value', value);
     }
@@ -853,3 +864,84 @@ export function TypeForMethod(val) {
   }
   throw new OutOfRange('TypeForValue', val);
 }
+
+// Convenience methods for conversion between host guest environments of
+// "bridgeable" data consisting of primitive values that lack identity, possibly
+// composed arbitrarily deep in JSON-like tree structures (useful for
+// functionality that relies heavily on host functionality, e.g. Intl).
+// Currently excludes support for all symbols and for non-array objects, but the
+// the former could be relaxed to support well-known symbols and the latter
+// could be relaxed to support fully bridgeable "record" objects.
+export const bridgeableForHost = data => {
+  // As a special case, we support conversion of List data from guest to host
+  // (but not from host to guest, which would conflict with conversion to an
+  // Array instance).
+  if (!(data instanceof Value) && Array.isArray(data)) {
+    return data.map(bridgeableForHost);
+  }
+  const type = Type(data);
+  switch (type) {
+    case 'Undefined': return undefined;
+    case 'Null': return null;
+    case 'Boolean': return data.booleanValue();
+    case 'String': return data.stringValue();
+    case 'Number': return data.numberValue();
+    case 'BigInt': return data.bigintValue();
+    case 'Symbol': throw new Error(`Symbols are not currently bridgeable: ${data.Description}`);
+    case 'Object': {
+      if (isArrayExoticObject(data)) {
+        const lengthDesc = OrdinaryGetOwnProperty(data, new Value('length'));
+        Assert(IsDataDescriptor(lengthDesc));
+        const length = lengthDesc.Value.numberValue();
+        return Array.from({ length }, (_, i) => {
+          const key = X(ToString(F(i)));
+          const valueDesc = X(OrdinaryGetOwnProperty(data, key));
+          if (valueDesc === Value.undefined) return;
+          if (!IsDataDescriptor(valueDesc)) {
+            throw new Error(`accessor property at array index ${i} is not bridgeable`);
+          }
+          return bridgeableForHost(valueDesc.Value);
+        });
+      }
+      throw new Error('Non-array objects are not currently bridgeable');
+    }
+    default: throw new Error(`Non-bridgeable guest value type: ${type}`);
+  }
+};
+export const bridgeableForGuest = (data, realmRec) => {
+  const type = typeof data;
+  switch (type) {
+    case 'undefined':
+    case 'boolean':
+    case 'string':
+    case 'number':
+    case 'bigint':
+      return new Value(data);
+    case 'object':
+      if (data === null) return Value.null;
+      if (Array.isArray(data)) {
+        const guestList = data.map(item => bridgeableForGuest(item, realmRec));
+        return X(CreateArrayFromList(guestList));
+      }
+      const guestObj = OrdinaryObjectCreate(realmRec.Intrinsics['%Object.prototype%']);
+      for (const [hostName, hostValue] of Object.entries(data)) {
+        if (typeof hostName !== 'string') {
+          throw new Error(`Non-string property keys are not bridgeable: ${String(hostName)}`);
+        }
+        const guestName = bridgeableForGuest(hostName, realmRec);
+        const guestValue = bridgeableForGuest(hostValue, realmRec);
+        X(CreateDataPropertyOrThrow(guestObj, guestName, guestValue));
+      }
+      return guestObj;
+    default: throw new Error(`Non-bridgeable host value type: ${type}`);
+  }
+};
+export const tryBridgeToGuest = (thunk, realmRec) => {
+  let hostResult;
+  try {
+    hostResult = thunk();
+  } catch (err) {
+    return surroundingAgent.Throw(err.name, 'Raw', err.message);
+  }
+  return bridgeableForGuest(hostResult, realmRec);
+};
