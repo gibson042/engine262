@@ -50,7 +50,7 @@ if (!process.send) {
   if (ARGV.h || ARGV.help) {
     // eslint-disable-next-line prefer-template
     const usage = `
-      Usage: node ${path.relative(process.cwd(), __filename)} [--run-slow-tests] [TEST-PATTERN]...
+      Usage: node ${path.relative(process.cwd(), __filename)} [--extended-tests] [--run-slow-tests] [TEST-PATTERN]...
       Run test262 tests against engine262.
 
       TEST-PATTERN supports glob syntax, and is interpreted relative to
@@ -95,6 +95,7 @@ if (!process.send) {
   const NUM_WORKERS = process.env.NUM_WORKERS
     ? Number.parseInt(process.env.NUM_WORKERS, 10)
     : Math.round(CPU_COUNT * 0.75);
+  const RUN_EXTENDED_TESTS = ARGV['extended-tests'];
   const RUN_SLOW_TESTS = ARGV['run-slow-tests'];
 
   const createWorker = () => {
@@ -186,7 +187,10 @@ if (!process.send) {
     }
 
     for await (const file of files) {
-      if (/annexB|intl402|_FIXTURE/.test(file)) {
+      if (/_FIXTURE/.test(file)) {
+        continue;
+      }
+      if (!RUN_EXTENDED_TESTS && /annexB|intl402/.test(file)) {
         continue;
       }
 
